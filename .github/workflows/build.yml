@@ -1,0 +1,69 @@
+name: Build APK
+
+# On every push: a debug APK published on the fixed "immersive-latest" pre-release,
+# so the phone (and the in-app updater) can always fetch the newest build from one link.
+
+on:
+  push:
+    branches: ["main", "dev", "ccr-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept Android SDK licences
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+
+      - name: Build debug APK
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Name the APK
+        shell: bash
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk out/Immersive.apk
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: out/*.apk
+          if-no-files-found: error
+
+      - name: Publish to the immersive-latest pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          notes="Latest build from \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA::7}, built $(date -u '+%Y-%m-%d %H:%M UTC'), versionCode $((100 + GITHUB_RUN_NUMBER)). Download **Immersive.apk**."
+          notes="$notes"$'\n\n'"Summary: $(git log -1 --pretty=%s)"
+          if gh release view immersive-latest > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/immersive-latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null
+            for name in $(gh release view immersive-latest --json assets -q '.assets[].name'); do
+              gh release delete-asset immersive-latest "$name" --yes
+            done
+            gh release upload immersive-latest out/*.apk --clobber
+            gh release edit immersive-latest --notes "$notes" --prerelease --target "$GITHUB_SHA"
+          else
+            gh release create immersive-latest out/*.apk --prerelease --title "Immersive — latest build" --notes "$notes" --target "$GITHUB_SHA"
+          fi

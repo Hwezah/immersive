@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_description">Immersive hides the status and navigation bars in every app and can rotate apps that lock themselves to one orientation. It watches which app is on screen to apply per-app rules, notices text fields so the keyboard still works, and presses Back for you while it holds the bars hidden. It reads nothing you type and sends nothing anywhere.</string>
+</resources>
