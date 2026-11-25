@@ -62,7 +62,7 @@ object Prefs {
         skipHint = sp.getBoolean("skipHint", true)
         hidePill = sp.getBoolean("hidePill", false)
         keepAlive = sp.getBoolean("keepAlive", true)
-        turn = Turn.of(sp.getString("turn", null)) ?: Turn.OFF
+        turn = Turn.of(sp.getString("turn", null)) ?: Turn.AUTO
         dark = sp.getBoolean("dark", true)
         rules = sp.getStringSet("rules", emptySet())!!.mapNotNull { e ->
             val i = e.indexOf('=')
@@ -122,7 +122,7 @@ object Prefs {
         private set
     fun useKeepAlive(v: Boolean) { keepAlive = v; save("keepAlive", v) }
 
-    var turn by mutableStateOf(Turn.OFF)
+    var turn by mutableStateOf(Turn.AUTO)
         private set
     fun useTurn(v: Turn) { turn = v; save("turn", v.name) }
 
