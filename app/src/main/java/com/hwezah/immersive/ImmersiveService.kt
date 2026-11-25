@@ -24,6 +24,7 @@ class ImmersiveService : AccessibilityService() {
         override fun onReceive(context: Context, intent: Intent) {
             // Locked: let go of the bars so the PIN pad works; unlocked: take them back.
             engine?.update()
+            engine?.pauseSensor(intent.action == Intent.ACTION_SCREEN_OFF)
             if (intent.action == Intent.ACTION_USER_PRESENT) main.postDelayed({ refreshApp() }, 300)
         }
     }
@@ -47,6 +48,7 @@ class ImmersiveService : AccessibilityService() {
             addAction(Intent.ACTION_USER_PRESENT)
         })
         Power.applyAll(this, Engine.defaultExcluded(this))
+        if (Prefs.turn != Turn.OFF) Power.unlockOrientationRequests()
         refreshApp()
         e.update()
         Tiles.refresh(this)

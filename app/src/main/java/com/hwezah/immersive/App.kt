@@ -125,17 +125,31 @@ private fun MainPage(resumed: Int, openApps: () -> Unit) {
                     "Rotate apps",
                     when (Prefs.turn) {
                         Turn.OFF -> "Off: apps decide"
-                        Turn.AUTO -> "Follows the sensor all four ways, even in apps locked to portrait"
+                        Turn.AUTO -> "All four ways by the sensor, upside down included, even in apps locked to portrait"
                         Turn.LAND_AUTO -> "Landscape either way, by the sensor"
                         else -> "Every app held in ${Prefs.turn.label.lowercase()}"
                     },
-                    Turn.entries.map { it to it.label }, Prefs.turn, { Prefs.useTurn(it); OverlayService.startIfNeeded(context) },
+                    Turn.entries.map { it to it.label }, Prefs.turn, {
+                        Prefs.useTurn(it)
+                        if (it != Turn.OFF) Power.unlockOrientationRequests()
+                        OverlayService.startIfNeeded(context)
+                    },
                 )
                 SettingRow(
-                    "System auto-rotate", if (writeSettings) "Android's own rotation switch" else "Tap to allow Immersive to change it",
+                    "Modify system settings",
+                    if (writeSettings) "Allowed: rotation also holds Android's own rotation setting, the strongest route"
+                    else "Allow this so rotation works on phones that ignore overlays. Tap to allow",
                     onClick = if (writeSettings) null else ({ open(context, Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, pkgUri(context))) }),
                 ) {
-                    Toggle(autoRotate, { if (Power.setSystemAutoRotate(context, it)) autoRotate = it }, enabled = writeSettings)
+                    if (writeSettings) Dot(Ink.good) else Button("Allow", { open(context, Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, pkgUri(context))) }, accent = Ink.red)
+                }
+                val managed = Prefs.turn != Turn.OFF && writeSettings
+                SettingRow(
+                    "System auto-rotate",
+                    if (managed) "Handled by Immersive while rotation is on; put back when it's off" else "Android's own rotation switch",
+                    enabled = writeSettings && !managed,
+                ) {
+                    Toggle(autoRotate, { if (Power.setSystemAutoRotate(context, it)) autoRotate = it }, enabled = writeSettings && !managed)
                 }
             }
             Spacer(Modifier.height(20.dp))

@@ -44,6 +44,7 @@ object Power {
         su("appops set $pkg WRITE_SETTINGS allow")
         // Android 13+: "restricted settings" for sideloaded apps would otherwise block the accessibility toggle.
         su("appops set $pkg ACCESS_RESTRICTED_SETTINGS allow")
+        if (ok) Prefs.raw().edit().putBoolean("root", true).apply()
         return ok && hasSecure(context)
     }
 
@@ -163,6 +164,31 @@ object Power {
     fun setSystemAutoRotate(context: Context, on: Boolean): Boolean = runCatching {
         Settings.System.putInt(context.contentResolver, Settings.System.ACCELEROMETER_ROTATION, if (on) 1 else 0)
     }.getOrDefault(false)
+
+    /**
+     * Holds the whole system at [rotation] (Surface.ROTATION_*): auto-rotate off, user_rotation set. What was
+     * there is saved first and put back by [restoreSystemRotation].
+     */
+    fun lockSystemRotation(context: Context, rotation: Int) {
+        set(context, Table.SYSTEM, Settings.System.ACCELEROMETER_ROTATION, "0")
+        set(context, Table.SYSTEM, Settings.System.USER_ROTATION, rotation.toString())
+    }
+
+    fun restoreSystemRotation(context: Context) {
+        restore(context, Table.SYSTEM, Settings.System.USER_ROTATION)
+        restore(context, Table.SYSTEM, Settings.System.ACCELEROMETER_ROTATION)
+    }
+
+    /**
+     * Root only: clears the window manager's switches that make it ignore apps' orientation requests
+     * (large screens on Android 12L+, and "fixed to user rotation" on some devices).
+     */
+    fun unlockOrientationRequests() {
+        if (!Prefs.raw().getBoolean("root", false)) return
+        Thread {
+            su("wm set-ignore-orientation-request false; wm fixed-to-user-rotation disabled")
+        }.start()
+    }
 
     /** Re-applies every privileged trick from the current settings. Cheap: unchanged values aren't rewritten. */
     fun applyAll(context: Context, excluded: Collection<String>) {

@@ -24,7 +24,10 @@ class OverlayService : Service() {
     private var engine: Engine? = null
 
     private val screen = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) { engine?.update() }
+        override fun onReceive(context: Context, intent: Intent) {
+            engine?.update()
+            engine?.pauseSensor(intent.action == Intent.ACTION_SCREEN_OFF)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -42,6 +45,7 @@ class OverlayService : Service() {
         Prefs.changed = { e.update(); Power.applyAll(this, Engine.defaultExcluded(this)) }
         registerReceiver(screen, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_USER_PRESENT)
         })
         Power.applyAll(this, Engine.defaultExcluded(this))

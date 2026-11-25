@@ -6,12 +6,14 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.hardware.SensorManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.OrientationEventListener
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -71,15 +73,16 @@ class Engine(private val context: Context, private val type: Int, private val ba
         val wantBars = !locked && (Prefs.hideStatus || Prefs.hideNav) && (rule?.immersive ?: (Prefs.immersive && !skip))
         val strength = rule?.strength ?: Prefs.strength
         val focus = wantBars && strength == Strength.FORCE && back != null && !keyboard && !yielding && Build.VERSION.SDK_INT >= 30
-        setBars(wantBars, focus)
 
-        val t = rule?.turn ?: (if (pkg == context.packageName) Turn.OFF else Prefs.turn)
-        setTurn(if (locked && t == Turn.OFF) Turn.OFF else t)
+        // Rotation applies everywhere, Immersive's own screen included.
+        val t = rule?.turn ?: Prefs.turn
+        val orientation = setTurn(t)
+        setBars(wantBars, focus, orientation)
         state = Status(bars = wantBars, focus = focus, turn = t, app = pkg)
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun setBars(on: Boolean, focus: Boolean) {
+    private fun setBars(on: Boolean, focus: Boolean, orientation: Int = UNSET) {
         if (!on) {
             bars?.let { v -> runCatching { wm.removeView(v) } }
             bars = null
@@ -102,25 +105,55 @@ class Engine(private val context: Context, private val type: Int, private val ba
             barsParams = this
         }
         val v = bars
+        // The bars window asks for the same orientation as the rotation window: two requests, one answer.
+        val o = if (orientation == UNSET) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED else orientation
         if (v == null) {
             p.flags = flags
+            p.screenOrientation = o
             val view = BarsView(context)
             runCatching { wm.addView(view, p) }.onSuccess { bars = view }.onFailure { lastError = it.message }
         } else {
-            if (p.flags != flags) { p.flags = flags; runCatching { wm.updateViewLayout(v, p) } }
+            if (p.flags != flags || p.screenOrientation != o) {
+                p.flags = flags
+                p.screenOrientation = o
+                runCatching { wm.updateViewLayout(v, p) }
+            }
             v.hide()
         }
     }
 
-    private fun setTurn(t: Turn) {
-        if (t == Turn.OFF) {
+    /**
+     * Puts rotation [t] in force; returns the screen orientation now being asked for ([UNSET] for none).
+     *
+     * Two routes at once, so whichever the phone honours wins:
+     * - the rotation window's screenOrientation: overrides apps that lock themselves to one orientation;
+     * - Android's own rotation setting (auto-rotate off, user_rotation set), when Immersive may write system
+     *   settings: works even where a ROM ignores overlay requests.
+     * Auto doesn't trust "full sensor" (some phones never turn upside down, some ignore it from overlays): it reads
+     * the accelerometer itself and asks for the exact direction, 0°, 90°, 180° or 270°.
+     */
+    private fun setTurn(t: Turn): Int {
+        if (t == Turn.AUTO || t == Turn.LAND_AUTO) startSensor() else stopSensor()
+        val o = when (t) {
+            Turn.OFF -> UNSET
+            Turn.AUTO -> if (facing >= 0) Rotations.orientationFor(context, facing) else t.orientation
+            Turn.LAND_AUTO -> if (facing >= 0 && Rotations.isLandscape(context, facing)) Rotations.orientationFor(context, facing) else t.orientation
+            else -> t.orientation
+        }
+        // The system setting: exact rotations only; restored when rotation goes back to Off.
+        if (Power.hasWriteSettings(context)) {
+            val r = if (o == UNSET) -1 else Rotations.rotationFor(context, o)
+            if (r >= 0) Power.lockSystemRotation(context, r) else if (t == Turn.OFF) Power.restoreSystemRotation(context)
+        }
+        if (o == UNSET) {
             turn?.let { v -> runCatching { wm.removeView(v) } }
             turn = null
-            return
+            return UNSET
         }
         val p = turnParams ?: WindowManager.LayoutParams(
             1, 1, type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -129,19 +162,54 @@ class Engine(private val context: Context, private val type: Int, private val ba
         }
         val v = turn
         if (v == null) {
-            p.screenOrientation = t.orientation
+            p.screenOrientation = o
             val view = View(context).apply { setBackgroundColor(Color.TRANSPARENT) }
             runCatching { wm.addView(view, p) }.onSuccess { turn = view }.onFailure { lastError = it.message }
-        } else if (p.screenOrientation != t.orientation) {
-            p.screenOrientation = t.orientation
-            runCatching { wm.updateViewLayout(v, p) }
+        } else if (p.screenOrientation != o) {
+            p.screenOrientation = o
+            runCatching { wm.updateViewLayout(v, p) }.onFailure { lastError = it.message }
         }
+        return o
+    }
+
+    /** The direction the phone is held in (Surface.ROTATION_*), or -1 before the sensor has spoken. */
+    private var facing = -1
+    private var sensor: OrientationEventListener? = null
+
+    private fun startSensor() {
+        if (sensor != null) return
+        sensor = object : OrientationEventListener(context, SensorManager.SENSOR_DELAY_UI) {
+            override fun onOrientationChanged(degrees: Int) {
+                if (degrees == ORIENTATION_UNKNOWN) return // flat on a table: keep what we have
+                val next = Rotations.fromDegrees(degrees, facing)
+                if (next != facing) {
+                    facing = next
+                    main.removeCallbacks(settle)
+                    // A short pause so a wobble doesn't flip the screen.
+                    main.postDelayed(settle, 250)
+                }
+            }
+        }.also { if (it.canDetectOrientation()) it.enable() else lastError = "No orientation sensor" }
+    }
+
+    private val settle = Runnable { refresh() }
+
+    private fun stopSensor() {
+        sensor?.disable()
+        sensor = null
+        facing = -1
+    }
+
+    /** Screen off: no point reading the sensor. */
+    fun pauseSensor(off: Boolean) {
+        if (off) { sensor?.disable() } else sensor?.enable()
     }
 
     fun stop() {
         main.removeCallbacksAndMessages(null)
         setBars(false, false)
         setTurn(Turn.OFF)
+        stopSensor()
         state = Status()
     }
 
@@ -233,6 +301,7 @@ class Engine(private val context: Context, private val type: Int, private val ba
     data class Status(val bars: Boolean = false, val focus: Boolean = false, val turn: Turn = Turn.OFF, val app: String? = null)
 
     companion object {
+        const val UNSET = -2
         /** What the running engine is doing, for the UI. */
         var state by mutableStateOf(Status())
         var lastError by mutableStateOf<String?>(null)

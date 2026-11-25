@@ -32,8 +32,12 @@ you turn the trick off.
 
 ## Rotation
 
-A 1px overlay carrying a screen orientation: Auto (all four ways, ignoring app locks), Portrait, Landscape,
-landscape-by-sensor, Upside down. Per-app overrides and Quick Settings tiles for both features.
+Auto reads the accelerometer itself and asks for the exact direction — 0°, 90°, 180° (upside down) or 270° —
+through two routes at once: a 1px overlay carrying that orientation (overrides apps locked to portrait) and,
+once "Modify system settings" is allowed, Android's own rotation setting (works where a ROM ignores overlays;
+put back when rotation is turned off). With root it also clears the window manager's "ignore orientation
+requests" switches. Fixed choices: Portrait, Landscape, landscape-by-sensor, Upside down. Per-app overrides and
+Quick Settings tiles for both features.
 
 ## Caveats
 
