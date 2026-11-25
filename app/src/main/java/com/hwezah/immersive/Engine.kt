@@ -92,6 +92,9 @@ class Engine(private val context: Context, private val type: Int, private val ba
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or
+            // "I draw the bar backgrounds myself" (and draw nothing): bars that do show are see-through,
+            // not the opaque black strip Android paints for windows without this.
+            WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS or
             (if (focus) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         val p = barsParams ?: WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, type, flags, PixelFormat.TRANSLUCENT,
@@ -258,6 +261,9 @@ class Engine(private val context: Context, private val type: Int, private val ba
             systemUiVisibility = f
             if (Build.VERSION.SDK_INT >= 30) windowInsetsController?.let { c ->
                 c.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                // No opaque or semi-transparent (scrim) bar backgrounds: Android's hidden APPEARANCE_OPAQUE_* (1, 2)
+                // and APPEARANCE_SEMI_TRANSPARENT_* (32, 64) bits, cleared.
+                c.setSystemBarsAppearance(0, 1 or 2 or 32 or 64)
                 c.hide(types())
                 val keep = (if (!Prefs.hideStatus) WindowInsets.Type.statusBars() else 0) or (if (!Prefs.hideNav) WindowInsets.Type.navigationBars() else 0)
                 if (keep != 0) c.show(keep)

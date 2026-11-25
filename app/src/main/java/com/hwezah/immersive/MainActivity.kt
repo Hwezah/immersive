@@ -28,6 +28,14 @@ class MainActivity : ComponentActivity() {
         Updater.app = applicationContext
         // Full screen by default: the app draws under where the bars were and hides both itself.
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        // No black strip or scrim where the bars were: transparent bar backgrounds drawn by us, no contrast scrims.
+        @Suppress("DEPRECATION")
+        window.apply {
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            statusBarColor = android.graphics.Color.TRANSPARENT
+            navigationBarColor = android.graphics.Color.TRANSPARENT
+            if (Build.VERSION.SDK_INT >= 29) { isStatusBarContrastEnforced = false; isNavigationBarContrastEnforced = false }
+        }
         if (Build.VERSION.SDK_INT >= 28) window.attributes = window.attributes.apply {
             layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
